@@ -314,7 +314,7 @@ function installUI() {
             <div class="cpb-info-card cpb-field"><strong>当前角色</strong><div id="cpb-character" class="cpb-current"></div></div>
             <div class="cpb-info-card cpb-field"><strong>当前 API</strong><div id="cpb-api"></div></div>
           </div>
-          <label class="cpb-field" for="cpb-alias"><strong>备注（可选）</strong><input id="cpb-alias" class="text_pole" maxlength="80" type="text" placeholder="修仙梨子 / 现代梨子" /></label>
+          <label class="cpb-field" for="cpb-alias"><strong>备注（可选）</strong><input id="cpb-alias" class="text_pole" maxlength="80" type="text" placeholder="现代版 / 古代版" /></label>
           <div class="cpb-section-title">① 预设绑定（可不绑定）</div>
           <label class="cpb-field" for="cpb-preset"><strong>选择预设</strong><select id="cpb-preset" class="text_pole"></select></label>
           <div class="cpb-actions"><button id="cpb-save-preset" type="button" class="menu_button">保存预设绑定</button><button id="cpb-remove-preset" type="button" class="menu_button">解除预设绑定</button></div>
