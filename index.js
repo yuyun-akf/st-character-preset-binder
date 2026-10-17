@@ -302,28 +302,38 @@ function installUI() {
     const root = makeElement('section', 'cpb-root');
     root.id = ROOT_ID;
     root.innerHTML = `
-      <details class="cpb-details">
-        <summary>🔗 角色卡 · 预设与世界书绑定器</summary>
-        <div class="cpb-content">
-          <label class="cpb-switch"><input id="cpb-enabled" type="checkbox"/> 角色切换时自动应用绑定</label>
+      <div class="inline-drawer cpb-drawer">
+        <div class="inline-drawer-toggle inline-drawer-header cpb-summary" role="button" tabindex="0" aria-expanded="false">
+          <div class="cpb-title"><span class="cpb-title-icon">🔗</span><span>角色卡 · 预设与世界书绑定器</span></div>
+          <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down cpb-summary-icon" aria-hidden="true"></div>
+        </div>
+        <div class="inline-drawer-content cpb-content">
+          <label class="cpb-switch"><input id="cpb-enabled" type="checkbox"/> <span>角色切换时自动应用绑定</span></label>
           <p class="cpb-muted">用本地角色卡文件区分同名角色；仅管理你主动绑定的内容，不更换 API 或模型。</p>
-          <div class="cpb-field"><strong>当前角色</strong><div id="cpb-character" class="cpb-current"></div></div>
-          <div class="cpb-field"><strong>当前 API</strong><div id="cpb-api"></div></div>
+          <div class="cpb-info-grid">
+            <div class="cpb-info-card cpb-field"><strong>当前角色</strong><div id="cpb-character" class="cpb-current"></div></div>
+            <div class="cpb-info-card cpb-field"><strong>当前 API</strong><div id="cpb-api"></div></div>
+          </div>
           <label class="cpb-field" for="cpb-alias"><strong>备注（可选）</strong><input id="cpb-alias" class="text_pole" maxlength="80" type="text" placeholder="修仙梨子 / 现代梨子" /></label>
           <div class="cpb-section-title">① 预设绑定（可不绑定）</div>
           <label class="cpb-field" for="cpb-preset"><strong>选择预设</strong><select id="cpb-preset" class="text_pole"></select></label>
           <div class="cpb-actions"><button id="cpb-save-preset" type="button" class="menu_button">保存预设绑定</button><button id="cpb-remove-preset" type="button" class="menu_button">解除预设绑定</button></div>
           <div class="cpb-section-title">② 全局世界书绑定（可不绑定）</div>
-          <label class="cpb-switch"><input id="cpb-manage-worlds" type="checkbox"/> 启用这张卡的全局世界书自动切换</label>
+          <label class="cpb-switch"><input id="cpb-manage-worlds" type="checkbox"/> <span>启用这张卡的全局世界书自动切换</span></label>
           <p class="cpb-muted">不勾选＝完全不接管世界书，保持当前启用状态；勾选后，将全局世界书替换为下方选择的组合。</p>
-          <fieldset id="cpb-world-control" class="cpb-world-control"><legend>选择世界书（支持多选）</legend><div id="cpb-world-list" class="cpb-world-list"></div><button id="cpb-clear-worlds" type="button" class="menu_button">取消勾选全部（保存后自动关闭所有全局世界书）</button></fieldset>
+          <fieldset id="cpb-world-control" class="cpb-world-control">
+            <legend>选择世界书（支持多选）</legend>
+            <div id="cpb-world-list" class="cpb-world-list"></div>
+            <button id="cpb-clear-worlds" type="button" class="menu_button">取消勾选全部（保存后自动关闭所有全局世界书）</button>
+          </fieldset>
           <div id="cpb-world-current" class="cpb-muted"></div>
           <div id="cpb-world-warning" class="cpb-warning"></div>
           <div class="cpb-actions"><button id="cpb-save-worlds" type="button" class="menu_button">保存世界书设置</button><button id="cpb-remove-worlds" type="button" class="menu_button">解除世界书绑定</button></div>
           <div id="cpb-status" class="cpb-status" aria-live="polite"></div>
-          <hr/><strong>已保存的绑定</strong><div id="cpb-list" class="cpb-list"></div>
+          <div class="cpb-section-title">已保存的绑定</div>
+          <div id="cpb-list" class="cpb-list"></div>
         </div>
-      </details>`;
+      </div>`;
     parent.append(root);
     const query = id => root.querySelector(`#${id}`);
     elements = {
@@ -363,7 +373,18 @@ function installUI() {
         updatePanel();
         status('已解除全局世界书绑定；当前启用的世界书不会被改动。', 'success');
     });
-    root.querySelector('summary').addEventListener('click', () => setTimeout(updatePanel, 0));
+    const drawerToggle = root.querySelector('.cpb-summary');
+    drawerToggle.addEventListener('click', () => {
+        drawerToggle.setAttribute('aria-expanded', String(!drawerToggle.classList.contains('cpb-expanded')));
+        drawerToggle.classList.toggle('cpb-expanded');
+        setTimeout(updatePanel, 0);
+    });
+    drawerToggle.addEventListener('keydown', event => {
+        if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            drawerToggle.click();
+        }
+    });
     updatePanel();
 }
 function initialize() {
