@@ -6,6 +6,7 @@
  * - Explicitly binding an empty lorebook list clears all global lorebooks on activation.
  */
 import { selected_world_info, world_names } from '../../../world-info.js';
+import { power_user } from '../../../power-user.js';
 
 const EXTENSION_KEY = 'st_character_preset_binder';
 const ROOT_ID = 'cpb-settings-root';
@@ -14,6 +15,8 @@ let started = false;
 let pendingApply = null;
 let applyRevision = 0;
 let elements = null;
+let themeRetryTimer = null;
+let themeRetryStartedAt = 0;
 
 function context() { return SillyTavern.getContext(); }
 function getSettings() {
@@ -55,7 +58,7 @@ function availableThemeNames() {
     const select = nativeThemeSelect();
     return select ? [...select.options].map(option => option.value).filter(Boolean) : [];
 }
-function currentThemeName() { return nativeThemeSelect()?.value || ''; }
+function currentThemeName() { return String(power_user.theme || nativeThemeSelect()?.value || ''); }
 function availableWorldNames() { return Array.isArray(world_names) ? world_names : []; }
 function activeWorldNames() { return Array.isArray(selected_world_info) ? [...new Set(selected_world_info)] : []; }
 
@@ -281,23 +284,60 @@ function saveCurrentThemeBinding() {
     status(`美化主题绑定成功：${card.name} → ${theme}`, 'success');
 }
 
-/** Native UI theme selector runs SillyTavern's applyTheme and persists settings. */
+/**
+ * Wait for an in-flight native theme load before requesting another one.
+ * BaiBai Tools' lazy theme loader disables #themes during an async fetch,
+ * and uses a native capture-phase change listener.
+ */
+function retryThemeAfterBusy() {
+    if (themeRetryTimer !== null) return;
+    if (!themeRetryStartedAt) themeRetryStartedAt = Date.now();
+    if (Date.now() - themeRetryStartedAt > 15000) {
+        themeRetryStartedAt = 0;
+        status('主题加载等待超时，请检查是否有其他美化扩展仍在加载。', 'warning');
+        return;
+    }
+    themeRetryTimer = setTimeout(() => {
+        themeRetryTimer = null;
+        if (!getSettings().enabled) {
+            themeRetryStartedAt = 0;
+            return;
+        }
+        // Re-evaluate the CURRENT card, not the card that began loading.
+        const latestCard = activeCharacter();
+        const latestRule = latestCard ? themeBindingFor(latestCard.key) : null;
+        if (!latestCard || !latestRule) {
+            themeRetryStartedAt = 0;
+            return;
+        }
+        applyThemeBinding(latestCard, latestRule);
+    }, 200);
+}
+
+/** Dispatch real change so native/capture-phase theme loaders receive it. */
 function applyThemeBinding(card, rule) {
     if (!rule || typeof rule.theme !== 'string' || !rule.theme) return;
+    if (activeCharacter()?.key !== card.key) return;
     const selector = nativeThemeSelect();
-    if (!selector || typeof $ !== 'function') {
+    if (!selector) {
         status('找不到酒馆的主题选择器，无法自动切换。', 'warning');
         return;
     }
     if (!availableThemeNames().includes(rule.theme)) {
-        status(`已绑定的美化主题「${rule.theme}」不存在；当前主题保持不变。`, 'warning');
+        status('已绑定的美化主题「' + rule.theme + '」不存在；当前主题保持不变。', 'warning');
         return;
     }
-    if (selector.value === rule.theme || activeCharacter()?.key !== card.key) return;
-    $(selector).val(rule.theme).trigger('change');
-    console.debug('[Character Preset Binder] UI theme:', card.key, rule.theme);
+    if (selector.disabled) {
+        retryThemeAfterBusy();
+        return;
+    }
+    themeRetryStartedAt = 0;
+    // Dropdown text may update before async theme configuration is applied.
+    if (selector.value === rule.theme && power_user.theme === rule.theme) return;
+    selector.value = rule.theme;
+    selector.dispatchEvent(new Event('change', { bubbles: true }));
+    console.debug('[Character Preset Binder] UI theme requested:', card.key, rule.theme);
 }
-
 /** Native SillyTavern select element triggers official persistence and update events. */
 function applyWorldBinding(card, rule) {
     if (!rule || !Array.isArray(rule.worlds)) return;
@@ -326,15 +366,10 @@ async function applyBinding(reason = 'chat') {
     const card = activeCharacter();
     if (!card) return;
     const themeRule = themeBindingFor(card.key);
-    if (themeRule) {
-        applyThemeBinding(card, themeRule);
-        updatePanel();
-    }
+    if (themeRule) applyThemeBinding(card, themeRule);
     const worldRule = worldBindingFor(card.key);
-    if (worldRule) {
-        applyWorldBinding(card, worldRule);
-        updatePanel();
-    }
+    if (worldRule) applyWorldBinding(card, worldRule);
+    if (themeRule || worldRule) updatePanel();
     const active = activePresetManager();
     if (!active) return;
     const rule = presetBindingFor(card.key, active.apiId);
