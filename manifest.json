@@ -4,7 +4,7 @@
   "js": "index.js",
   "css": "style.css",
   "author": "OpenAI ChatGPT",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "homePage": "https://github.com/yuyun-akf/st-character-preset-binder",
   "auto_update": true
 }
