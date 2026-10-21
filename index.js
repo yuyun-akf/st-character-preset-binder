@@ -19,13 +19,14 @@ function context() { return SillyTavern.getContext(); }
 function getSettings() {
     const ctx = context();
     if (!ctx.extensionSettings[EXTENSION_KEY] || typeof ctx.extensionSettings[EXTENSION_KEY] !== 'object') {
-        ctx.extensionSettings[EXTENSION_KEY] = { enabled: true, bindings: {}, worldBindings: {} };
+        ctx.extensionSettings[EXTENSION_KEY] = { enabled: true, bindings: {}, worldBindings: {}, themeBindings: {} };
         ctx.saveSettingsDebounced();
     }
     const settings = ctx.extensionSettings[EXTENSION_KEY];
     if (typeof settings.enabled !== 'boolean') settings.enabled = true;
     if (!settings.bindings || typeof settings.bindings !== 'object' || Array.isArray(settings.bindings)) settings.bindings = {};
     if (!settings.worldBindings || typeof settings.worldBindings !== 'object' || Array.isArray(settings.worldBindings)) settings.worldBindings = {};
+    if (!settings.themeBindings || typeof settings.themeBindings !== 'object' || Array.isArray(settings.themeBindings)) settings.themeBindings = {};
     return settings;
 }
 function saveSettings() { context().saveSettingsDebounced(); }
@@ -48,6 +49,13 @@ function activePresetManager() {
 }
 function presetBindingFor(key, apiId) { return getSettings().bindings[key]?.[apiId] ?? null; }
 function worldBindingFor(key) { return getSettings().worldBindings[key] ?? null; }
+function themeBindingFor(key) { return getSettings().themeBindings[key] ?? null; }
+function nativeThemeSelect() { return document.getElementById('themes'); }
+function availableThemeNames() {
+    const select = nativeThemeSelect();
+    return select ? [...select.options].map(option => option.value).filter(Boolean) : [];
+}
+function currentThemeName() { return nativeThemeSelect()?.value || ''; }
 function availableWorldNames() { return Array.isArray(world_names) ? world_names : []; }
 function activeWorldNames() { return Array.isArray(selected_world_info) ? [...new Set(selected_world_info)] : []; }
 
@@ -94,6 +102,7 @@ function updatePanel() {
     const active = activePresetManager();
     const presetRule = card && active ? presetBindingFor(card.key, active.apiId) : null;
     const worldRule = card ? worldBindingFor(card.key) : null;
+    const themeRule = card ? themeBindingFor(card.key) : null;
     elements.enabled.checked = settings.enabled;
     elements.currentCharacter.textContent = card
         ? `${card.name}（角色卡文件：${card.key}）`
@@ -123,32 +132,51 @@ function updatePanel() {
     elements.worldCurrent.textContent = `当前全局启用：${activeWorldNames().join('、') || '无'}`;
     const missing = (worldRule?.worlds || []).filter(name => !bookNames.includes(name));
     elements.worldWarning.textContent = missing.length ? `注意：绑定的世界书已找不到：${missing.join('、')}。重新选择并保存后即可修复。` : '';
+    const themeNames = availableThemeNames();
+    const draftTheme = elements.theme.value;
+    elements.theme.replaceChildren();
+    for (const name of themeNames) elements.theme.add(new Option(name, name));
+    const desiredTheme = themeRule?.theme || currentThemeName();
+    const shownTheme = themeNames.includes(draftTheme) && document.activeElement === elements.theme ? draftTheme : desiredTheme;
+    if (themeNames.includes(shownTheme)) elements.theme.value = shownTheme;
+    elements.theme.disabled = !card || !themeNames.length;
+    elements.saveTheme.disabled = !card || !themeNames.length;
+    elements.removeTheme.disabled = !themeRule;
+    elements.themeCurrent.textContent = `当前使用主题：${currentThemeName() || '未知'}`;
+
     elements.alias.disabled = !card;
-    elements.alias.value = worldRule?.alias ?? presetRule?.alias ?? '';
+    elements.alias.value = themeRule?.alias ?? worldRule?.alias ?? presetRule?.alias ?? '';
 
     const segments = [];
     if (presetRule) segments.push(`预设：${presetRule.preset}`);
     if (worldRule) segments.push(`全局世界书：${worldRule.worlds.length ? worldRule.worlds.join('、') : '明确不启用任何世界书'}`);
+    if (themeRule) segments.push(`美化主题：${themeRule.theme}`);
     if (!card) status('请先打开一张角色卡的单人聊天。');
     else if (presetRule && !names.includes(presetRule.preset)) status(`找不到已绑定预设「${presetRule.preset}」，预设将保持原状。`, 'warning');
     else if (missing.length) status('已绑定的部分世界书不存在，请检查世界书名称。', 'warning');
+    else if (themeRule && !themeNames.includes(themeRule.theme)) status(`找不到已绑定美化主题「${themeRule.theme}」，主题将保持原状。`, 'warning');
     else if (segments.length) status(`已绑定 ${segments.join('；')}${settings.enabled ? '' : '（自动应用已暂停）'}`, 'success');
-    else status('当前角色尚未绑定预设或全局世界书。');
+    else status('当前角色尚未绑定预设、全局世界书或美化主题。');
     updateBindingList();
 }
 function updateBindingList() {
     if (!elements) return;
     const settings = getSettings();
-    const allKeys = new Set([...Object.keys(settings.bindings), ...Object.keys(settings.worldBindings)]);
+    const allKeys = new Set([...Object.keys(settings.bindings), ...Object.keys(settings.worldBindings), ...Object.keys(settings.themeBindings)]);
     const rows = [];
     for (const key of allKeys) {
         const presets = Object.entries(settings.bindings[key] || {})
             .filter(([, rule]) => typeof rule?.preset === 'string')
             .map(([apiId, rule]) => `${currentApiText(apiId)}：${rule.preset}`);
         const worldRule = settings.worldBindings[key];
-        if (!presets.length && !worldRule) continue;
+        const themeRule = settings.themeBindings[key];
+        if (!presets.length && !worldRule && !themeRule) continue;
         const presetRule = Object.values(settings.bindings[key] || {}).find(rule => rule?.name);
-        rows.push({ key, presets, worldRule, name: worldRule?.name || presetRule?.name || '未命名角色', alias: worldRule?.alias || presetRule?.alias || '' });
+        rows.push({
+            key, presets, worldRule, themeRule,
+            name: themeRule?.name || worldRule?.name || presetRule?.name || '未命名角色',
+            alias: themeRule?.alias || worldRule?.alias || presetRule?.alias || '',
+        });
     }
     rows.sort((a, b) => (a.alias || a.name).localeCompare(b.alias || b.name, 'zh'));
     elements.list.replaceChildren();
@@ -163,13 +191,15 @@ function updateBindingList() {
         body.append(makeElement('div', 'cpb-row-title', item.alias || item.name));
         for (const line of item.presets) body.append(makeElement('div', 'cpb-muted', `预设 · ${line}`));
         if (item.worldRule) body.append(makeElement('div', 'cpb-muted', `全局世界书 · ${item.worldRule.worlds.length ? item.worldRule.worlds.join('、') : '不启用任何世界书'}`));
+        if (item.themeRule) body.append(makeElement('div', 'cpb-muted', `美化主题 · ${item.themeRule.theme}`));
         body.append(makeElement('div', 'cpb-file', `${item.key}${knownCards.has(item.key) ? '' : ' · 本地找不到该角色卡'}`));
         const remove = makeElement('button', 'cpb-delete', '全部解除');
         remove.type = 'button';
-        remove.title = '仅删除该角色的全部绑定，不删除卡片、预设或世界书';
+        remove.title = '仅删除该角色的全部绑定，不删除卡片、预设、世界书或主题';
         remove.addEventListener('click', () => {
             delete getSettings().bindings[item.key];
             delete getSettings().worldBindings[item.key];
+            delete getSettings().themeBindings[item.key];
             saveSettings();
             updatePanel();
         });
@@ -188,6 +218,10 @@ function deleteWorldBinding(key) {
     delete getSettings().worldBindings[key];
     saveSettings();
 }
+function deleteThemeBinding(key) {
+    delete getSettings().themeBindings[key];
+    saveSettings();
+}
 async function saveCurrentPresetBinding() {
     const card = activeCharacter();
     const active = activePresetManager();
@@ -200,6 +234,7 @@ async function saveCurrentPresetBinding() {
     settings.bindings[card.key] ??= {};
     settings.bindings[card.key][active.apiId] = { name: card.name, alias: elements.alias.value.trim(), preset: name };
     if (settings.worldBindings[card.key]) settings.worldBindings[card.key].alias = elements.alias.value.trim();
+    if (settings.themeBindings[card.key]) settings.themeBindings[card.key].alias = elements.alias.value.trim();
     saveSettings();
     updatePanel();
     status(`预设绑定成功：${card.name} → ${name}`, 'success');
@@ -217,6 +252,7 @@ function saveCurrentWorldBinding() {
     }
     const worlds = selectedWorldsFromUI();
     settings.worldBindings[card.key] = { name: card.name, alias: elements.alias.value.trim(), worlds };
+    if (settings.themeBindings[card.key]) settings.themeBindings[card.key].alias = elements.alias.value.trim();
     for (const presetRule of Object.values(settings.bindings[card.key] || {})) {
         if (presetRule && typeof presetRule === 'object') presetRule.alias = elements.alias.value.trim();
     }
@@ -225,6 +261,43 @@ function saveCurrentWorldBinding() {
     updatePanel();
     status(worlds.length ? `全局世界书绑定成功：${worlds.join('、')}` : '已绑定为空列表：进入该角色时关闭全部全局世界书。', 'success');
 }
+function saveCurrentThemeBinding() {
+    const card = activeCharacter();
+    const theme = elements.theme.value;
+    if (!card || !theme || !availableThemeNames().includes(theme)) {
+        status('无法保存：请先打开角色卡，并选择有效的酒馆主题。', 'warning');
+        return;
+    }
+    const settings = getSettings();
+    const alias = elements.alias.value.trim();
+    settings.themeBindings[card.key] = { name: card.name, alias, theme };
+    if (settings.worldBindings[card.key]) settings.worldBindings[card.key].alias = alias;
+    for (const rule of Object.values(settings.bindings[card.key] || {})) {
+        if (rule && typeof rule === 'object') rule.alias = alias;
+    }
+    saveSettings();
+    if (settings.enabled) applyThemeBinding(card, settings.themeBindings[card.key]);
+    updatePanel();
+    status(`美化主题绑定成功：${card.name} → ${theme}`, 'success');
+}
+
+/** Native UI theme selector runs SillyTavern's applyTheme and persists settings. */
+function applyThemeBinding(card, rule) {
+    if (!rule || typeof rule.theme !== 'string' || !rule.theme) return;
+    const selector = nativeThemeSelect();
+    if (!selector || typeof $ !== 'function') {
+        status('找不到酒馆的主题选择器，无法自动切换。', 'warning');
+        return;
+    }
+    if (!availableThemeNames().includes(rule.theme)) {
+        status(`已绑定的美化主题「${rule.theme}」不存在；当前主题保持不变。`, 'warning');
+        return;
+    }
+    if (selector.value === rule.theme || activeCharacter()?.key !== card.key) return;
+    $(selector).val(rule.theme).trigger('change');
+    console.debug('[Character Preset Binder] UI theme:', card.key, rule.theme);
+}
+
 /** Native SillyTavern select element triggers official persistence and update events. */
 function applyWorldBinding(card, rule) {
     if (!rule || !Array.isArray(rule.worlds)) return;
@@ -252,6 +325,11 @@ async function applyBinding(reason = 'chat') {
     if (!getSettings().enabled) return;
     const card = activeCharacter();
     if (!card) return;
+    const themeRule = themeBindingFor(card.key);
+    if (themeRule) {
+        applyThemeBinding(card, themeRule);
+        updatePanel();
+    }
     const worldRule = worldBindingFor(card.key);
     if (worldRule) {
         applyWorldBinding(card, worldRule);
@@ -329,6 +407,11 @@ function installUI() {
           <div id="cpb-world-current" class="cpb-muted"></div>
           <div id="cpb-world-warning" class="cpb-warning"></div>
           <div class="cpb-actions"><button id="cpb-save-worlds" type="button" class="menu_button">保存世界书设置</button><button id="cpb-remove-worlds" type="button" class="menu_button">解除世界书绑定</button></div>
+          <div class="cpb-section-title">③ 酒馆美化主题绑定（可不绑定）</div>
+          <p class="cpb-muted">选择酒馆设置中的已保存主题。未绑定＝不切换，保持当前主题；不会修改主题文件本身。</p>
+          <label class="cpb-field" for="cpb-theme"><strong>选择美化主题</strong><select id="cpb-theme" class="text_pole"></select></label>
+          <div id="cpb-theme-current" class="cpb-muted"></div>
+          <div class="cpb-actions"><button id="cpb-save-theme" type="button" class="menu_button">保存主题绑定</button><button id="cpb-remove-theme" type="button" class="menu_button">解除主题绑定</button></div>
           <div id="cpb-status" class="cpb-status" aria-live="polite"></div>
           <div class="cpb-section-title">已保存的绑定</div>
           <div id="cpb-list" class="cpb-list"></div>
@@ -341,7 +424,9 @@ function installUI() {
         preset: query('cpb-preset'), savePreset: query('cpb-save-preset'), removePreset: query('cpb-remove-preset'),
         manageWorlds: query('cpb-manage-worlds'), worldControl: query('cpb-world-control'), worldList: query('cpb-world-list'),
         clearWorlds: query('cpb-clear-worlds'), saveWorlds: query('cpb-save-worlds'), removeWorlds: query('cpb-remove-worlds'),
-        worldCurrent: query('cpb-world-current'), worldWarning: query('cpb-world-warning'), status: query('cpb-status'), list: query('cpb-list'),
+        worldCurrent: query('cpb-world-current'), worldWarning: query('cpb-world-warning'),
+        theme: query('cpb-theme'), themeCurrent: query('cpb-theme-current'), saveTheme: query('cpb-save-theme'), removeTheme: query('cpb-remove-theme'),
+        status: query('cpb-status'), list: query('cpb-list'),
     };
     elements.enabled.addEventListener('change', () => {
         getSettings().enabled = elements.enabled.checked;
@@ -373,6 +458,14 @@ function installUI() {
         updatePanel();
         status('已解除全局世界书绑定；当前启用的世界书不会被改动。', 'success');
     });
+    elements.saveTheme.addEventListener('click', () => saveCurrentThemeBinding());
+    elements.removeTheme.addEventListener('click', () => {
+        const card = activeCharacter();
+        if (!card) return;
+        deleteThemeBinding(card.key);
+        updatePanel();
+        status('已解除美化主题绑定；当前主题不会被改动。', 'success');
+    });
     const drawerToggle = root.querySelector('.cpb-summary');
     drawerToggle.addEventListener('click', () => {
         drawerToggle.setAttribute('aria-expanded', String(!drawerToggle.classList.contains('cpb-expanded')));
@@ -397,6 +490,7 @@ function initialize() {
     if (event_types.MAIN_API_CHANGED) eventSource.on(event_types.MAIN_API_CHANGED, () => { updatePanel(); scheduleApply('api'); });
     if (event_types.PRESET_CHANGED) eventSource.on(event_types.PRESET_CHANGED, () => updatePanel());
     if (event_types.CHARACTER_EDITED) eventSource.on(event_types.CHARACTER_EDITED, () => updatePanel());
+    if (typeof $ === 'function') $('#themes').on('change', () => updatePanel());
     scheduleApply('startup');
 }
 try {
