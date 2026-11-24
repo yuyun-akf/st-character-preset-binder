@@ -348,7 +348,32 @@ async function applyThemeBackground() {
 function installThemeUI(root) {
     const q = id => root.querySelector('#'+id);
     const theme = q('cpb-theme'), bg = q('cpb-bg'), preview = q('cpb-bg-preview'), enabled = q('cpb-theme-enabled'), note = q('cpb-bg-status');
+    const picker = q('cpb-bg-picker');
+    const gallery = document.createElement('dialog');
+    gallery.className = 'cpb-gallery';
+    const header = makeElement('div','cpb-gallery-header');
+    const heading = makeElement('strong','','选择背景图片');
+    const close = makeElement('button','menu_button','关闭'); close.type='button';
+    close.onclick=()=>gallery.close();
+    header.append(heading,close);
+    const tiles = makeElement('div','cpb-gallery-grid');
+    gallery.append(header,tiles); root.append(gallery);
+    picker.onclick=()=>{
+        tiles.replaceChildren();
+        for(const name of backgroundFiles) {
+            const tile=makeElement('button','cpb-gallery-tile');
+            tile.type='button'; tile.title=name; tile.setAttribute('aria-label',name);
+            tile.setAttribute('aria-pressed',String(bg.value===name));
+            const img=document.createElement('img'); img.loading='lazy'; img.alt=name; img.src=backgroundPath(name);
+            tile.append(img);
+            tile.onclick=()=>{bg.value=name;showPreview();gallery.close();};
+            tiles.append(tile);
+        }
+        if(!backgroundFiles.length) tiles.append(makeElement('div','cpb-muted','暂无背景图片'));
+        gallery.showModal();
+    };
     function showPreview() {
+        picker.textContent=bg.value || '选择背景图片';
         preview.hidden = !bg.value;
         if (bg.value) preview.src = backgroundPath(bg.value); else preview.removeAttribute('src');
     }
@@ -453,7 +478,7 @@ function installUI() {
           <div class="cpb-tab-panel" data-cpb-panel="theme" hidden>
             <label class="cpb-switch"><input id="cpb-theme-enabled" type="checkbox"/>切换美化时自动应用背景</label>
             <label class="cpb-field"><strong>美化主题</strong><select id="cpb-theme" class="text_pole"></select></label>
-            <label class="cpb-field"><strong>背景图片</strong><select id="cpb-bg" class="text_pole"></select></label>
+            <label class="cpb-field"><strong>背景图片</strong><select id="cpb-bg" hidden></select><button id="cpb-bg-picker" type="button" class="text_pole cpb-bg-picker">选择背景图片</button></label>
             <img id="cpb-bg-preview" alt="背景预览" hidden />
             <div class="cpb-actions"><button id="cpb-bg-save" class="menu_button" type="button">保存绑定</button><button id="cpb-bg-remove" class="menu_button" type="button">解除绑定</button></div>
             <div id="cpb-bg-status" class="cpb-muted" aria-live="polite"></div>
