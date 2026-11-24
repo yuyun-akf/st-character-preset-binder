@@ -5,6 +5,7 @@
  * - Disabling lorebook control leaves current global lorebooks untouched.
  * - Explicitly binding an empty lorebook list clears all global lorebooks on activation.
  */
+import { background_settings } from '../../../backgrounds.js';
 import { selected_world_info, world_names } from '../../../world-info.js';
 
 const EXTENSION_KEY = 'st_character_preset_binder';
@@ -26,6 +27,8 @@ function getSettings() {
     if (typeof settings.enabled !== 'boolean') settings.enabled = true;
     if (!settings.bindings || typeof settings.bindings !== 'object' || Array.isArray(settings.bindings)) settings.bindings = {};
     if (!settings.worldBindings || typeof settings.worldBindings !== 'object' || Array.isArray(settings.worldBindings)) settings.worldBindings = {};
+    if (typeof settings.themeEnabled !== 'boolean') settings.themeEnabled = true;
+    if (!settings.themeBindings || typeof settings.themeBindings !== 'object' || Array.isArray(settings.themeBindings)) settings.themeBindings = {};
     return settings;
 }
 function saveSettings() { context().saveSettingsDebounced(); }
@@ -295,6 +298,106 @@ function scheduleApply(reason = 'chat') {
         void applyBinding(reason);
     }, APPLY_DELAY_MS);
 }
+
+const themeName = () => document.querySelector('#themes')?.value || '';
+let themeRevision = 0;
+let backgroundFiles = [];
+async function loadBackgroundFiles() {
+    const response = await fetch('/api/backgrounds/all', {method:'POST', headers:context().getRequestHeaders(), body:'{}'});
+    if (!response.ok) throw new Error('无法读取背景图库');
+    const data = await response.json();
+    const images = Array.isArray(data) ? data : data.images;
+    backgroundFiles = (images || []).map(x => typeof x === 'string' ? x : x.filename).filter(x => typeof x === 'string' && x);
+    return backgroundFiles;
+}
+function backgroundPath(name) { return 'backgrounds/' + name.split('/').map(encodeURIComponent).join('/'); }
+async function applyThemeBackground() {
+    const revision = ++themeRevision;
+    const theme = themeName();
+    const settings = getSettings();
+    const name = Object.hasOwn(settings.themeBindings, theme) ? settings.themeBindings[theme] : null;
+    if (!settings.themeEnabled || !name) return;
+    try {
+        const files = await loadBackgroundFiles();
+        if (revision !== themeRevision || theme !== themeName() || !getSettings().themeEnabled || getSettings().themeBindings[theme] !== name) return;
+        if (!files.includes(name)) throw new Error('绑定的背景图片不存在');
+        // Update global background only; do not rewrite per-chat locked metadata.
+        const native = [...document.querySelectorAll('.bg_example[bgfile]')].find(el => el.getAttribute('bgfile') === name && el.getAttribute('custom') !== 'true');
+        const url = native && typeof $ === 'function' ? $(native).data('url') : null;
+        background_settings.name = name;
+        background_settings.url = url || 'url("' + backgroundPath(name) + '")';
+        const bg = document.getElementById('bg1');
+        const locked = context().chatMetadata?.custom_background;
+        if (bg && !locked) bg.style.backgroundImage = background_settings.url;
+        saveSettings();
+        if (typeof $ === 'function') {
+            $('.bg_example').removeClass('selected');
+            if (native) $(native).addClass('selected');
+        }
+    } catch (error) {
+        console.warn('[Character Preset Binder]', error);
+        const status = document.getElementById('cpb-bg-status');
+        if (status && revision === themeRevision) status.textContent = error.message;
+    }
+}
+function installThemeUI(root) {
+    const q = id => root.querySelector('#'+id);
+    const theme = q('cpb-theme'), bg = q('cpb-bg'), preview = q('cpb-bg-preview'), enabled = q('cpb-theme-enabled'), note = q('cpb-bg-status');
+    function showPreview() {
+        preview.hidden = !bg.value;
+        if (bg.value) preview.src = backgroundPath(bg.value); else preview.removeAttribute('src');
+    }
+    function renderList() {
+        const list = q('cpb-theme-list'); list.replaceChildren();
+        for (const [key, name] of Object.entries(getSettings().themeBindings)) {
+            const row = makeElement('div','cpb-row');
+            const label = makeElement('div','cpb-row-body',key+' · '+name);
+            const remove = makeElement('button','menu_button','解除'); remove.type='button';
+            remove.onclick=()=>{ delete getSettings().themeBindings[key]; saveSettings(); renderList(); if(theme.value===key) selectBinding(); };
+            row.append(label,remove); list.append(row);
+        }
+        if (!list.children.length) list.append(makeElement('div','cpb-muted','暂无绑定'));
+    }
+    function selectBinding() {
+        const name = Object.hasOwn(getSettings().themeBindings,theme.value) ? getSettings().themeBindings[theme.value] : '';
+        bg.value = name || (backgroundFiles.includes(background_settings.name) ? background_settings.name : '');
+        q('cpb-bg-remove').disabled = !name;
+        note.textContent = name ? (backgroundFiles.includes(name) ? '已绑定：'+name : '绑定的背景已不存在：'+name) : '尚未绑定';
+        showPreview();
+    }
+    let refreshRevision=0;
+    async function refresh() {
+        const revision=++refreshRevision;
+        enabled.checked=getSettings().themeEnabled;
+        theme.replaceChildren();
+        for(const opt of document.querySelectorAll('#themes option')) theme.add(new Option(opt.textContent,opt.value));
+        theme.value=themeName();
+        try { await loadBackgroundFiles(); } catch(e) { note.textContent=e.message; return; }
+        if(revision!==refreshRevision)return;
+        bg.replaceChildren(new Option('选择背景图片',''));
+        for(const name of backgroundFiles) bg.add(new Option(name,name));
+        selectBinding(); renderList();
+    }
+    root.querySelectorAll('[data-cpb-tab]').forEach(button=>button.onclick=()=>{
+        const tab=button.dataset.cpbTab;
+        root.querySelectorAll('[data-cpb-tab]').forEach(b=>b.setAttribute('aria-selected',String(b===button)));
+        root.querySelectorAll('[data-cpb-panel]').forEach(p=>p.hidden=p.dataset.cpbPanel!==tab);
+        if(tab==='theme') void refresh();
+    });
+    theme.onchange=selectBinding;
+    bg.onchange=showPreview;
+    enabled.onchange=()=>{getSettings().themeEnabled=enabled.checked; saveSettings(); if(enabled.checked) void applyThemeBackground(); else ++themeRevision;};
+    q('cpb-bg-save').onclick=()=>{
+        if(!theme.value || !backgroundFiles.includes(bg.value)) {note.textContent='请选择美化和背景';return;}
+        Object.defineProperty(getSettings().themeBindings,theme.value,{value:bg.value,writable:true,enumerable:true,configurable:true});
+        saveSettings(); selectBinding(); renderList();
+        if(theme.value===themeName()) void applyThemeBackground();
+    };
+    q('cpb-bg-remove').onclick=()=>{delete getSettings().themeBindings[theme.value]; saveSettings(); selectBinding(); renderList();};
+    // Native theme selector uses jQuery change events.
+    $(document).on('change.cpbTheme','#themes',()=>{ void applyThemeBackground(); if(!root.querySelector('[data-cpb-panel="theme"]').hidden) void refresh(); });
+}
+
 function installUI() {
     if (document.getElementById(ROOT_ID)) return;
     const parent = document.getElementById('extensions_settings2') || document.getElementById('extensions_settings');
@@ -304,37 +407,47 @@ function installUI() {
     root.innerHTML = `
       <div class="inline-drawer cpb-drawer">
         <div class="inline-drawer-toggle inline-drawer-header cpb-summary" role="button" tabindex="0" aria-expanded="false">
-          <div class="cpb-title"><span class="cpb-title-icon">🔗</span><span>角色卡 · 预设与世界书绑定器</span></div>
+          <div class="cpb-title"><span>角色卡 · 预设与世界书绑定器</span></div>
           <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down cpb-summary-icon" aria-hidden="true"></div>
         </div>
         <div class="inline-drawer-content cpb-content">
+          <div class="cpb-tabs"><button type="button" class="menu_button" data-cpb-tab="role" aria-selected="true">角色卡绑定</button><button type="button" class="menu_button" data-cpb-tab="theme" aria-selected="false">美化背景绑定</button></div>
+          <div class="cpb-tab-panel" data-cpb-panel="role">
           <label class="cpb-switch"><input id="cpb-enabled" type="checkbox"/> <span>角色切换时自动应用绑定</span></label>
-          <p class="cpb-muted">用本地角色卡文件区分同名角色；仅管理你主动绑定的内容，不更换 API 或模型。</p>
           <div class="cpb-info-grid">
             <div class="cpb-info-card cpb-field"><strong>当前角色</strong><div id="cpb-character" class="cpb-current"></div></div>
             <div class="cpb-info-card cpb-field"><strong>当前 API</strong><div id="cpb-api"></div></div>
           </div>
           <label class="cpb-field" for="cpb-alias"><strong>备注（可选）</strong><input id="cpb-alias" class="text_pole" maxlength="80" type="text" placeholder="现代版 / 古代版" /></label>
-          <div class="cpb-section-title">① 预设绑定（可不绑定）</div>
+          <div class="cpb-section-title">预设绑定</div>
           <label class="cpb-field" for="cpb-preset"><strong>选择预设</strong><select id="cpb-preset" class="text_pole"></select></label>
           <div class="cpb-actions"><button id="cpb-save-preset" type="button" class="menu_button">保存预设绑定</button><button id="cpb-remove-preset" type="button" class="menu_button">解除预设绑定</button></div>
-          <div class="cpb-section-title">② 全局世界书绑定（可不绑定）</div>
+          <div class="cpb-section-title">全局世界书绑定</div>
           <label class="cpb-switch"><input id="cpb-manage-worlds" type="checkbox"/> <span>启用这张卡的全局世界书自动切换</span></label>
-          <p class="cpb-muted">不勾选＝完全不接管世界书，保持当前启用状态；勾选后，将全局世界书替换为下方选择的组合。</p>
           <fieldset id="cpb-world-control" class="cpb-world-control">
             <legend>选择世界书（支持多选）</legend>
             <div id="cpb-world-list" class="cpb-world-list"></div>
-            <button id="cpb-clear-worlds" type="button" class="menu_button">取消勾选全部（保存后自动关闭所有全局世界书）</button>
+            <button id="cpb-clear-worlds" type="button" class="menu_button">取消全选</button>
           </fieldset>
           <div id="cpb-world-current" class="cpb-muted"></div>
           <div id="cpb-world-warning" class="cpb-warning"></div>
           <div class="cpb-actions"><button id="cpb-save-worlds" type="button" class="menu_button">保存世界书设置</button><button id="cpb-remove-worlds" type="button" class="menu_button">解除世界书绑定</button></div>
           <div id="cpb-status" class="cpb-status" aria-live="polite"></div>
-          <div class="cpb-section-title">已保存的绑定</div>
-          <div id="cpb-list" class="cpb-list"></div>
+          <details><summary>已保存的角色绑定</summary><div id="cpb-list" class="cpb-list"></div></details>
+          </div>
+          <div class="cpb-tab-panel" data-cpb-panel="theme" hidden>
+            <label class="cpb-switch"><input id="cpb-theme-enabled" type="checkbox"/>切换美化时自动应用背景</label>
+            <label class="cpb-field"><strong>美化主题</strong><select id="cpb-theme" class="text_pole"></select></label>
+            <label class="cpb-field"><strong>背景图片</strong><select id="cpb-bg" class="text_pole"></select></label>
+            <img id="cpb-bg-preview" alt="背景预览" hidden />
+            <div class="cpb-actions"><button id="cpb-bg-save" class="menu_button" type="button">保存绑定</button><button id="cpb-bg-remove" class="menu_button" type="button">解除绑定</button></div>
+            <div id="cpb-bg-status" class="cpb-muted" aria-live="polite"></div>
+            <details><summary>已绑定美化</summary><div id="cpb-theme-list" class="cpb-list"></div></details>
+          </div>
         </div>
       </div>`;
     parent.append(root);
+    installThemeUI(root);
     const query = id => root.querySelector(`#${id}`);
     elements = {
         enabled: query('cpb-enabled'), currentCharacter: query('cpb-character'), api: query('cpb-api'), alias: query('cpb-alias'),
@@ -398,6 +511,7 @@ function initialize() {
     if (event_types.PRESET_CHANGED) eventSource.on(event_types.PRESET_CHANGED, () => updatePanel());
     if (event_types.CHARACTER_EDITED) eventSource.on(event_types.CHARACTER_EDITED, () => updatePanel());
     scheduleApply('startup');
+    void applyThemeBackground();
 }
 try {
     const ctx = context();
