@@ -5,6 +5,7 @@
  * - Disabling lorebook control leaves current global lorebooks untouched.
  * - Explicitly binding an empty lorebook list clears all global lorebooks on activation.
  */
+import { getRequestHeaders, chat_metadata } from '../../../../script.js';
 import { background_settings } from '../../../backgrounds.js';
 import { selected_world_info, world_names } from '../../../world-info.js';
 
@@ -303,7 +304,7 @@ const themeName = () => document.querySelector('#themes')?.value || '';
 let themeRevision = 0;
 let backgroundFiles = [];
 async function loadBackgroundFiles() {
-    const response = await fetch('/api/backgrounds/all', {method:'POST', headers:context().getRequestHeaders(), body:'{}'});
+    const response = await fetch('/api/backgrounds/all', {method:'POST', headers:getRequestHeaders(), body:'{}'});
     if (!response.ok) throw new Error('无法读取背景图库');
     const data = await response.json();
     const images = Array.isArray(data) ? data : data.images;
@@ -327,12 +328,16 @@ async function applyThemeBackground() {
         background_settings.name = name;
         background_settings.url = url || 'url("' + backgroundPath(name) + '")';
         const bg = document.getElementById('bg1');
-        const locked = context().chatMetadata?.custom_background;
+        const locked = chat_metadata?.custom_background;
         if (bg && !locked) bg.style.backgroundImage = background_settings.url;
+        if (locked) {
+            const note = document.getElementById('cpb-bg-status');
+            if (note) note.textContent = '全局背景已切换，当前聊天锁定了独立背景';
+        }
         saveSettings();
         if (typeof $ === 'function') {
-            $('.bg_example').removeClass('selected');
-            if (native) $(native).addClass('selected');
+            $('.bg_example').removeClass('selected-background');
+            if (native) $(native).addClass('selected-background');
         }
     } catch (error) {
         console.warn('[Character Preset Binder]', error);
@@ -395,7 +400,17 @@ function installThemeUI(root) {
     };
     q('cpb-bg-remove').onclick=()=>{delete getSettings().themeBindings[theme.value]; saveSettings(); selectBinding(); renderList();};
     // Native theme selector uses jQuery change events.
-    $(document).on('change.cpbTheme','#themes',()=>{ void applyThemeBackground(); if(!root.querySelector('[data-cpb-panel="theme"]').hidden) void refresh(); });
+    let observedTheme = themeName();
+    const onThemeChange = () => {
+        const current = themeName();
+        if (!current || current === observedTheme) return;
+        observedTheme = current;
+        void applyThemeBackground();
+        if (!root.querySelector('[data-cpb-panel="theme"]').hidden) void refresh();
+    };
+    $('#themes').on('change.cpbTheme', () => setTimeout(onThemeChange, 0));
+    // Also detect programmatic theme changes that do not dispatch a bubbling event.
+    setInterval(onThemeChange, 400);
 }
 
 function installUI() {
