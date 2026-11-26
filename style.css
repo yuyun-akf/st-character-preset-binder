@@ -2,7 +2,7 @@
 .cpb-root { margin: 0; color: inherit; }
 .cpb-drawer { margin: 0; }
 .cpb-summary { cursor: pointer; user-select: none; }
-.cpb-title { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; min-width: 0; }
+.cpb-title { display: inline-flex; align-items: center; gap: 8px; font-weight: inherit; min-width: 0; }
 .cpb-title-icon { flex: 0 0 auto; }
 
 /* Crucial: keep SillyTavern's native closed state. Its drawer click handler will show/hide this. */
