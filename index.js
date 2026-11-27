@@ -447,7 +447,7 @@ function installUI() {
     root.innerHTML = `
       <div class="inline-drawer cpb-drawer">
         <div class="inline-drawer-toggle inline-drawer-header cpb-summary" role="button" tabindex="0" aria-expanded="false">
-          <div class="cpb-title"><span>角色卡 · 预设与世界书绑定器</span></div>
+          <b>角色卡 · 预设与世界书绑定器</b>
           <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down cpb-summary-icon" aria-hidden="true"></div>
         </div>
         <div class="inline-drawer-content cpb-content">
